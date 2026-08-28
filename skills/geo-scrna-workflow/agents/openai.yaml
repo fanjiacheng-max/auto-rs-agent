@@ -1,0 +1,4 @@
+interface:
+  display_name: "GEO scRNA-seq Workflow"
+  short_description: "Build and run a guarded modular scRNA-seq pipeline"
+  brand_color: "#2F6F63"

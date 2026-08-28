@@ -1,0 +1,15 @@
+#!/usr/bin/env Rscript
+args <- commandArgs(trailingOnly = TRUE)
+script_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+script_path <- if (length(script_arg)) sub("^--file=", "", script_arg[1L]) else "run_pipeline.R"
+project_root <- normalizePath(dirname(script_path), winslash = "/", mustWork = FALSE)
+config_path <- if (length(args)) args[1L] else file.path(project_root, "config", "example_config.R")
+source(file.path(project_root, "config", "default_config.R"))
+files <- sort(list.files(file.path(project_root, "R"), pattern = "\\.R$", full.names = TRUE))
+for (f in files) sys.source(f, envir = .GlobalEnv)
+config_env <- new.env(parent = .GlobalEnv)
+sys.source(config_path, envir = config_env)
+if (!exists("CFG", envir = config_env, inherits = FALSE)) stop("Config file must define CFG")
+CFG <- normalize_config(deep_merge(default_config(), get("CFG", envir = config_env)))
+validate_config(CFG)
+run_pipeline(CFG)

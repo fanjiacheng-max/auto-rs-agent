@@ -1,0 +1,210 @@
+# Module Dependency Registry for geo-scrna-workflow
+# ─────────────────────────────────────────────────
+# This file is the single source of truth for:
+#   - pipeline module dependencies
+#   - scientific gates (human review points)
+#   - required inputs
+#   - cache checkpoints
+#
+# The dependency resolver reads this file to build execution plans.
+# Do NOT encode these rules in SKILL.md natural language alone.
+
+# ── Pipeline modules ───────────────────────────────────────────────────────
+modules:
+
+  io:
+    label: "Data loading"
+    config_key: null             # always runs; no enable/disable flag
+    always_enabled: true
+    cache_checkpoint: "01_combined_raw"
+    requires_modules: []
+    required_inputs:
+      - species                  # ask_user if null; never infer from filename
+      - data_source              # gse or input_dir; mutually exclusive
+    gates:
+      - sample_sheet_review      # G1: must pass before io runs
+    produces:
+      - combined_raw_object
+
+  qc:
+    label: "Quality control"
+    config_key: "qc.enabled"
+    cache_checkpoint: "02_qc"
+    requires_modules: [io]
+    required_inputs: []
+    gates: []                    # no human gate — auto-sweep params
+    auto_optimize:
+      param_sweep:
+        - key: "qc.nmads"
+          values: [2.5, 3.0, 3.5]
+        - key: "qc.max_percent_mt"
+          values: [null, 20, 25]  # null = MAD-only, no hard cap
+      metric: "cell_retention_rate"   # pick highest; read from 01_QC_summary_by_sample.csv
+    produces:
+      - qc_object
+      - "results/tables/01_QC_summary_by_sample.csv"
+
+  integration:
+    label: "Normalization & integration"
+    config_key: "integration.enabled"
+    cache_checkpoint: "03_integrated"
+    requires_modules: [qc]
+    required_inputs: []
+    gates: []
+    produces:
+      - integrated_object
+      - "results/tables/02_integration_decisions.csv"
+
+  annotation:
+    label: "Cell type annotation (provisional)"
+    config_key: "annotation.enabled"
+    cache_checkpoint: "04_annotated"
+    requires_modules: [integration]
+    required_inputs: []
+    gates: []                    # gate is downstream, not here
+    produces:
+      - annotated_object
+      - "results/tables/02_cluster_annotation_review.csv"
+
+  markers:
+    label: "Marker genes"
+    config_key: "markers.enabled"
+    cache_checkpoint: "05_markers"
+    requires_modules: [annotation]
+    required_inputs: []
+    gates:
+      - annotation_review        # G2: reviewed labels required
+    produces:
+      - "results/tables/03_celltype_markers.csv"
+
+  differential:
+    label: "Differential expression"
+    config_key: null             # always attempted; gated by contrast validity at runtime
+    cache_checkpoint: "06_differential"
+    requires_modules: [annotation]
+    required_inputs: []
+    gates:
+      - annotation_review        # G2
+      - contrast_confirmation    # G3
+    produces:
+      - "results/tables/04_DE_exploratory_cell_level.csv"
+      - "results/tables/05_pseudobulk_eligibility.csv"
+      - "results/tables/06_pseudobulk_DE_*.csv"
+
+  composition:
+    label: "Cell composition"
+    config_key: "composition.enabled"
+    cache_checkpoint: "07_composition"
+    requires_modules: [annotation]
+    required_inputs: []
+    gates:
+      - annotation_review
+      - contrast_confirmation
+    produces:
+      - "results/figures_pdf/composition_*.pdf"
+      - "results/tables/composition_*.csv"
+
+  enrichment:
+    label: "Pathway enrichment"
+    config_key: "enrichment.enabled"
+    cache_checkpoint: "08_enrichment"
+    requires_modules: [differential]
+    required_inputs: []
+    gates: []
+    produces:
+      - "results/tables/07_enrichment_*.csv"
+
+  pathway_scores:
+    label: "Pathway scores"
+    config_key: "pathway_scores.enabled"
+    cache_checkpoint: "09_pathway_scores"
+    requires_modules: [integration]  # does NOT require annotation
+    required_inputs: []
+    gates: []
+    produces:
+      - "results/tables/pathway_scores_*.csv"
+
+  pseudotime:
+    label: "Pseudotime / trajectory"
+    config_key: "pseudotime.enabled"
+    cache_checkpoint: "10_pseudotime"
+    requires_modules: [annotation]
+    required_inputs: []
+    gates:
+      - annotation_review
+      - pseudotime_config        # G4: ask once, persist per project
+    produces:
+      - "results/tables/pseudotime_*.csv"
+      - "results/figures_pdf/pseudotime_*.pdf"
+
+  cellchat:
+    label: "Cell-cell communication"
+    config_key: "cellchat.enabled"
+    cache_checkpoint: "11_cellchat"
+    requires_modules: [annotation]
+    required_inputs: []
+    gates:
+      - annotation_review        # G2: guardrails forbid CellChat on provisional labels
+    produces:
+      - "results/tables/cellchat_*.csv"
+      - "results/figures_pdf/cellchat_*.pdf"
+
+  hdwgcna:
+    label: "hdWGCNA co-expression network"
+    config_key: "hdwgcna.enabled"
+    cache_checkpoint: "12_hdwgcna"
+    requires_modules: [annotation]
+    required_inputs: []
+    gates:
+      - annotation_review
+      - hdwgcna_config           # G5: ask once, persist per project
+    produces:
+      - "results/tables/hdwgcna_*.csv"
+      - "results/figures_pdf/hdwgcna_*.pdf"
+
+# ── Scientific gates ───────────────────────────────────────────────────────
+gates:
+
+  sample_sheet_review:
+    description: "Review sample identities, group labels, and batch variables"
+    trigger: "first_time"        # once per project; re-check if sample_sheet_path changes
+    persist_key: "sample_sheet_path"
+    question: |
+      A sample sheet has been generated at {sample_sheet_path}.
+      Please review sample names, group assignments, donor IDs, and batch variables.
+      Edit the file and confirm when ready, or provide an existing reviewed sheet path.
+
+  annotation_review:
+    description: "Review provisional cell type labels before downstream analysis"
+    trigger: "first_time"        # once per project
+    persist_key: "external_annotation_file"
+    question: |
+      Provisional annotations are available at {annotation_review_table}.
+      Please review cluster labels, create a reviewed CSV with columns
+      (seurat_cluster, celltype), and provide the file path.
+
+  contrast_confirmation:
+    description: "Confirm comparison groups for differential / composition analysis"
+    trigger: "first_time"        # once per project
+    persist_key: "confirmed_contrast"
+    question: |
+      Detected groups in data: {detected_groups}.
+      Which two groups should be compared? (format: Case Control)
+
+  pseudotime_config:
+    description: "Specify cell types and root cluster for trajectory analysis"
+    trigger: "first_time"        # once per project; reuse on subsequent calls
+    persist_key: "pseudotime_config"  # stores {celltypes: [...], root_cluster: "..."}
+    question: |
+      Pseudotime requires biological input.
+      1. Which cell types should be included in the trajectory? (from: {available_celltypes})
+      2. Which cluster is the biological root / starting state?
+
+  hdwgcna_config:
+    description: "Specify target cell types for co-expression network"
+    trigger: "first_time"        # once per project; reuse on subsequent calls
+    persist_key: "hdwgcna_target_celltypes"
+    question: |
+      hdWGCNA requires a focused cell type selection.
+      Which cell type(s) should the network be built on? (from: {available_celltypes})
+      Choose cell types with adequate cell counts (recommend ≥200 cells).

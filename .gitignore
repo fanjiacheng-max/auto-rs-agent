@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Runtime data (不入库)
+workspace/
+*.db
+*.db-shm
+*.db-wal
+
+# Env & secrets
+.env
+.env.*
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
