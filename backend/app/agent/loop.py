@@ -64,6 +64,10 @@ Follow its instructions step by step. Execute commands exactly as specified, ada
 - Keep the user informed with brief status messages between steps.
 - Modules listed as "Cached (skip)" already have results — do not re-run them.
 - Only run modules listed in "Will run".
+- After a differential or other omics analysis produces significant gene/protein candidates,
+  call `retrieve_biomedical_evidence` with the normalized candidate, including its exact
+  entity identity, species, contrast, and result reference. Do not use a raw gene symbol
+  alone and do not treat an empty retrieval as biological negative evidence.
 
 ## SKILL.md
 {skill_md}

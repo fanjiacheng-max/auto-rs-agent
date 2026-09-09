@@ -86,6 +86,26 @@ TOOL_SCHEMAS = [
             "required": ["question"],
         },
     },
+    {
+        "name": "retrieve_biomedical_evidence",
+        "description": (
+            "Retrieve traceable biomedical evidence for a statistically selected "
+            "gene, protein, or other omics candidate from the local RAG index. "
+            "Return evidence to the Agent for interpretation; do not treat a "
+            "missing result as biological negative evidence."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "candidate": {
+                    "type": "object",
+                    "description": "Normalized analysis candidate with entity, species, contrast, and provenance.",
+                },
+                "n_results": {"type": "integer", "minimum": 1, "maximum": 50},
+            },
+            "required": ["candidate"],
+        },
+    },
 ]
 
 
@@ -193,6 +213,34 @@ class ToolContext:
             "timed_out": result.timed_out,
         }
 
+    async def retrieve_biomedical_evidence(self, candidate: dict, n_results: int = 8) -> dict:
+        """Query the persistent local biomedical index without requiring an LLM key."""
+        if not isinstance(candidate, dict) or not candidate.get("entity"):
+            raise ValueError("candidate.entity is required")
+        from app.rag.vector_store import BiomedicalVectorStore
+
+        index = self.workspace / "rag" / "index"
+        if not index.exists():
+            # The repository seed index is useful for local development when a
+            # project has not created its own workspace yet.
+            from app.config import RAG_INDEX_DIR
+            index = RAG_INDEX_DIR
+        if not index.exists():
+            return {
+                "status": "unavailable",
+                "candidate": candidate,
+                "evidence": [],
+                "message": "RAG index not built; run backend/scripts/build_rag_index.py",
+            }
+        store = BiomedicalVectorStore(index)
+        hits = store.query_candidate(candidate, n_results=max(1, min(int(n_results), 50)))
+        return {
+            "status": "ok" if hits else "no_evidence",
+            "candidate": candidate,
+            "evidence": hits,
+            "collection_count": store.count(),
+        }
+
     def _snapshot_workspace(self) -> dict[str, int]:
         """Return {relative_path: size} for monitored directories."""
         from app.config import ARTIFACT_WATCH_DIRS, ARTIFACT_IGNORE_DIRS
@@ -224,5 +272,7 @@ class ToolContext:
             return await self.run_command(**tool_input)
         elif tool_name == "ask_user":
             return "ASK_USER"  # Handled specially in the loop
+        elif tool_name == "retrieve_biomedical_evidence":
+            return await self.retrieve_biomedical_evidence(**tool_input)
         else:
             return f"Error: unknown tool '{tool_name}'"

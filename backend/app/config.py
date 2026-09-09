@@ -5,6 +5,9 @@ BASE_DIR = Path(__file__).parent.parent.parent  # auto_rs_agent/
 SKILLS_DIR = BASE_DIR / "skills"
 WORKSPACE_DIR = BASE_DIR / "workspace"
 DB_PATH = WORKSPACE_DIR / ".agent.db"
+# Shared biomedical knowledge index. Individual projects may override this by
+# placing a RAG index under their own workspace/rag/index directory.
+RAG_INDEX_DIR = WORKSPACE_DIR / "rag" / "index"
 
 # LLM provider — support both official key and relay platform auth token
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")

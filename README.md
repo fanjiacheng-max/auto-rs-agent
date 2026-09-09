@@ -139,3 +139,47 @@ See [`SPEC.md`](SPEC.md) for full ADR log. Highlights:
 | State persistence | SQLite for runs/events; `status.json` for project state |
 | Dependency resolution | Declarative YAML registry; resolver, not LLM, decides execution order |
 | Frontend | React + TypeScript + Vite; useState/useEffect only |
+
+## Local Biomedical RAG (initial)
+
+The repository now includes a keyless local Chroma index for biomedical evidence. It uses a
+deterministic local hashing embedding so development and smoke tests do not require the
+Anthropic/OpenAI credentials used by the Agent loop.
+
+```bash
+# From the repository root, with Python 3.10+
+PYTHONPATH=backend python backend/scripts/build_rag_index.py
+PYTHONPATH=backend python backend/scripts/query_rag_index.py "TP53 transcription factor apoptosis cancer"
+```
+
+The seed build fetches public records for TP53 from UniProt, Reactome, Open Targets, and
+Europe PMC. Normalized records are written to `workspace/rag/normalized/`, the persistent
+Chroma database is written to `workspace/rag/index/`, and the build manifest is written to
+`workspace/rag/manifest.json`. `workspace/` is gitignored; these are runtime data, not source
+files to commit.
+
+This is an initial retrieval smoke-test index, not a complete biomedical knowledge base. The
+hashing embedding is useful for deterministic local tests but should later be replaced or
+combined with a stronger local biomedical embedding model. Exact entity-ID and metadata
+filters remain necessary for gene/protein/species-specific retrieval.
+
+The Agent exposes the same retrieval boundary as the tool
+`retrieve_biomedical_evidence`. The intended flow is: normalize a differential-analysis
+row with `app.agent.rag.load_candidates`, resolve the exact entity with
+`resolve_entity`, then pass the candidate to the Agent tool. The tool returns the local
+hits together with source metadata and collection size; the model is responsible for
+explaining the evidence and preserving its URLs.
+
+The RAG contract is covered by offline tests for adjusted-p-value/effect-size selection,
+species-safe identity resolution, provenance-preserving evidence assembly, source
+timeouts, cancellation, and persistent Chroma retrieval:
+
+```bash
+PYTHONPATH=backend python -B -m unittest discover -s backend/tests -t backend
+```
+
+The checked-in tests use two small fixture documents only. Runtime data remains under the
+gitignored `workspace/rag/` directory, so the Chroma files and downloaded public records
+are not committed to GitHub. This keeps the branch mergeable while allowing a later bulk
+loader to add versioned UniProt/GO/Reactome snapshots and on-demand Open Targets/Europe
+PMC evidence.
